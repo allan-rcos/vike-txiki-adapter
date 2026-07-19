@@ -1,0 +1,10 @@
+# Gerado por `bun run build` (prepare) — não versionar.
+dist
+
+# dependências
+node_modules
+
+# logs / temp
+*.log
+*.tmp
+.DS_Store
