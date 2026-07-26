@@ -32,6 +32,12 @@ export interface VikePageContext {
 /** Assinatura de `renderPage` importado de `vike/server`. */
 export type RenderPage = (pageContextInit: {
   urlOriginal: string;
+  /**
+   * Cabeçalhos crus da requisição. O Vike normaliza para `pageContext.headers`
+   * (nomes em minúsculas). Sem isto o `pageContext.headers` chega `null` e o
+   * servidor nunca enxerga o cookie de sessão nem o `user-agent`.
+   */
+  headersOriginal?: unknown;
 }) => Promise<VikePageContext>;
 
 export interface AdapterOptions {
@@ -115,7 +121,29 @@ export function createFetchHandler(
     }
 
     // 2. SSR do Vike.
-    const pageContext = await renderPage({ urlOriginal: request.url });
+    //
+    // `headersOriginal` é obrigatório, não opcional: é dele que o Vike deriva
+    // `pageContext.headers`. Sem repassá-lo o servidor renderiza toda rota como
+    // anônima (o cookie de sessão nunca chega) e o `vike-solid` também nunca
+    // detecta bot pelo `user-agent`.
+    let pageContext: VikePageContext;
+    try {
+      pageContext = await renderPage({
+        urlOriginal: request.url,
+        headersOriginal: request.headers,
+      });
+    } catch (error) {
+      // O txiki imprime só o stack de exceções não tratadas, sem a mensagem —
+      // o que transforma qualquer falha de render num 500 mudo. Logar aqui é a
+      // diferença entre "500" e saber o que quebrou.
+      const err = error as { message?: string; stack?: string };
+      console.error(
+        `[vike-txiki-adapter] falha ao renderizar ${pathname}: ${err?.message ?? String(error)}`
+      );
+      if (err?.stack) console.error(err.stack);
+      return new Response('Internal Server Error', { status: 500 });
+    }
+
     const { httpResponse } = pageContext;
     if (!httpResponse) {
       return new Response('Not Found', { status: 404 });
