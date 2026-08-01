@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Adapter agnóstico para servir um build de produção do Vike no runtime txiki.js (tjs), 100% WinterTC.",
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["vike", "txiki", "tjs", "ssr", "wintercg", "wintertc", "adapter"],
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
