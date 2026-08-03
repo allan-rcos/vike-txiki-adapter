@@ -1,6 +1,6 @@
 {
   "name": "vike-txiki-adapter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Adapter agnóstico para servir um build de produção do Vike no runtime txiki.js (tjs), 100% WinterTC.",
   "type": "module",
   "license": "Apache-2.0",

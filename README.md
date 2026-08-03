@@ -111,6 +111,12 @@ Retorna só o handler `fetch` Web-standard, sem depender do `tjs.serve` — úti
 | `port`       | `number`                 | `tjs.env.PORT` ou 3000 | Porta HTTP. |
 | `mimeTypes`  | `Record<string, string>` | `{}`                 | Overrides do mapa de MIME. |
 
+### Atrás de um proxy reverso
+
+A URL que chega ao `renderPage` tem o esquema do `X-Forwarded-Proto`, quando o cabeçalho vem; sem ele, o da conexão recebida. Isso importa porque o proxy termina o TLS: a conexão até aqui é sempre `http://`, e sem honrar o cabeçalho toda URL absoluta montada a partir dela — o `Location` de um `+redirects`, por exemplo — sairia em texto claro e jogaria o navegador para fora do TLS.
+
+> Confiar no cabeçalho só é seguro enquanto nada alcançar este servidor senão o proxy (escutando em loopback, com a porta fechada para fora). Exposto diretamente, ele vira entrada de usuário e deixa de valer como fonte.
+
 -----
 
 ## 🌐 i18n (LinguiJS) — opcional

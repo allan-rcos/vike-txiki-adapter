@@ -75,6 +75,30 @@ const DEFAULT_MIME: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8'
 };
 
+/**
+ * Esquema com que o cliente chegou, segundo o `X-Forwarded-Proto`.
+ * Retorna `null` quando o cabeçalho não veio (ou veio com valor que não é
+ * `http`/`https`), para que se caia no esquema da conexão recebida.
+ *
+ * Atrás de um proxy que termina TLS, a conexão que chega até aqui é sempre
+ * `http://` — quem sabe que o cliente veio por `https://` é só o proxy, e é
+ * isso que ele diz neste cabeçalho. Ignorá-lo faz toda URL absoluta derivada
+ * de `urlOriginal` sair em texto claro: o `Location` de um `+redirects`, por
+ * exemplo, joga o navegador para fora do TLS e cobra dele os saltos de volta.
+ *
+ * Confiar no cabeçalho só é seguro enquanto nada alcançar este servidor senão
+ * o proxy (escuta em loopback, porta fechada para fora). Exposto diretamente,
+ * ele passa a ser entrada de usuário e não vale mais como fonte.
+ */
+function forwardedProto(request: Request): 'http' | 'https' | null {
+  const header = request.headers.get('x-forwarded-proto');
+  if (!header) return null;
+  // Uma cadeia de proxies acumula valores (`https, http`); o primeiro é o do
+  // cliente, os demais são saltos internos.
+  const proto = header.split(',')[0]!.trim().toLowerCase();
+  return proto === 'http' || proto === 'https' ? proto : null;
+}
+
 function toBaseUrl(staticDir: URL | string): URL {
   if (staticDir instanceof URL) return staticDir;
   const withSlash = staticDir.endsWith('/') ? staticDir : `${staticDir}/`;
@@ -112,7 +136,13 @@ export function createFetchHandler(
   }
 
   return async function fetch(request: Request): Promise<Response> {
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
+
+    // O esquema do cliente vem do proxy quando ele o informa; senão, é o da
+    // conexão recebida. O `Host` já chega correto e não é tocado.
+    const proto = forwardedProto(request);
+    if (proto) url.protocol = `${proto}:`;
 
     // 1. Assets estáticos do build.
     if (pathname !== '/' && !pathname.endsWith('/')) {
@@ -129,7 +159,7 @@ export function createFetchHandler(
     let pageContext: VikePageContext;
     try {
       pageContext = await renderPage({
-        urlOriginal: request.url,
+        urlOriginal: url.href,
         headersOriginal: request.headers,
       });
     } catch (error) {
