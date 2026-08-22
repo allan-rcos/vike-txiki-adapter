@@ -1,0 +1,16 @@
+# As quebras de linha se decidem aqui, não no `~/.gitconfig` de quem clonou.
+#
+# Sem este arquivo a cópia de trabalho herda o `core.autocrlf` da máquina; num
+# Windows com ele em `true`, todo checkout grava CRLF. Este pacote roda dentro
+# do txiki.js sobre Alpine, onde um script com `\r` no shebang não executa — e o
+# sintoma aparece só no servidor.
+#
+# LF em tudo que o Git reconhece como texto.
+* text=auto eol=lf
+
+*.ts   text eol=lf
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.sh   text eol=lf
