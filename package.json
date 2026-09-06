@@ -4,7 +4,15 @@
   "description": "Adapter agnóstico para servir um build de produção do Vike no runtime txiki.js (tjs), 100% WinterTC.",
   "type": "module",
   "license": "Apache-2.0",
-  "keywords": ["vike", "txiki", "tjs", "ssr", "wintercg", "wintertc", "adapter"],
+  "keywords": [
+    "vike",
+    "txiki",
+    "tjs",
+    "ssr",
+    "wintercg",
+    "wintertc",
+    "adapter"
+  ],
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "exports": {
@@ -22,10 +30,14 @@
   "bin": {
     "vike-txiki-adapter": "dist/cli.mjs"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "bun build src/index.ts --outfile dist/index.mjs --target=node --packages external && bun build src/cli.ts --outfile dist/cli.mjs --target=node --packages external && bun build src/vite.ts --outfile dist/vite.mjs --target=node --packages external && chmod +x dist/cli.mjs && tsc --emitDeclarationOnly",
-    "prepare": "bun run build"
+    "prepare": "bun run build",
+    "typecheck": "tsc --noEmit",
+    "test:tjs": "bun build ./test/tjs/main.ts --outfile ./test/tjs/.bundle.mjs --target=node && tjs run ./test/tjs/.bundle.mjs"
   },
   "peerDependencies": {
     "vike": ">=0.4"
@@ -34,7 +46,8 @@
     "@babel/core": "^7.29.7",
     "@babel/preset-typescript": "^8.0.1",
     "@lingui/babel-plugin-lingui-macro": "^6.5.0",
-    "@lingui/format-po": "^6.5.0"
+    "@lingui/format-po": "^6.5.0",
+    "wts-logger": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

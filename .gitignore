@@ -4,6 +4,10 @@ dist
 # dependências
 node_modules
 
+# Bundle efêmero do teste de contrato: código que o `bun build` gera para o
+# `tjs` engolir, não fonte.
+test/tjs/.bundle.mjs
+
 # logs / temp
 *.log
 *.tmp

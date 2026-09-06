@@ -75,12 +75,15 @@ export async function buildTxikiServer(options: BuildOptions = {}): Promise<stri
     `import ${JSON.stringify(entryAbs)};\n` +
     `import { renderPage } from 'vike/server';\n` +
     `import { serve } from 'vike-txiki-adapter';\n` +
-    `const server = serve({\n` +
+    // A linha de boot sai do próprio `serve`, pelo logger — não por um
+    // `console.log` aqui. Um `console.log` no entry escaparia do nível e do
+    // formato configurados, e seria a única linha do processo que um coletor
+    // de log estruturado não conseguiria interpretar.
+    `serve({\n` +
     `  renderPage,\n` +
     `  staticDir: new URL(${JSON.stringify(clientRel)}, import.meta.url),\n` +
     `  port: Number(tjs.env.PORT ?? ${port})\n` +
-    `});\n` +
-    `console.log('▶ vike-txiki-adapter — http://localhost:' + (server.port ?? ${port}));\n`;
+    `});\n`;
 
   writeFileSync(tmpEntry, source);
 
