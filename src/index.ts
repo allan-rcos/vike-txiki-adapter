@@ -79,6 +79,18 @@ export type RenderPage = (pageContextInit: {
    * Para aparecer no cliente, a aplicação precisa declará-lo em `passToClient`.
    */
   requestId?: string;
+  /**
+   * Canal lateral para repasse de múltiplos cabeçalhos `Set-Cookie`.
+   *
+   * Array mutável preenchido pela aplicação durante o render e lido pelo
+   * adapter na montagem da resposta HTTP. O `renderPage` do Vike preserva o
+   * que recebe no `pageContextInit`, garantindo que os cookies acumulados
+   * cheguem ao final do ciclo sem sofrer achatamento pelo framework.
+   *
+   * **Não** pode entrar em `passToClient`: cookies são instruções de
+   * transporte HTTP e não devem ser serializados no payload da página.
+   */
+  setCookies?: string[];
 }) => Promise<VikePageContext>;
 
 export interface AdapterOptions {
@@ -176,6 +188,113 @@ function toBaseUrl(staticDir: URL | string): URL {
 }
 
 /**
+ * A posição do primeiro par com aquele nome, ou `-1`.
+ *
+ * @param pairs Os pares de cabeçalho.
+ * @param name  O nome procurado, em qualquer caixa.
+ */
+function indexOf(pairs: readonly [string, string][], name: string): number {
+  const lower = name.toLowerCase();
+  return pairs.findIndex(([candidate]) => candidate.toLowerCase() === lower);
+}
+
+/**
+ * Os pares que NÃO têm aquele nome, numa lista nova.
+ *
+ * @param pairs Os pares de cabeçalho.
+ * @param name  O nome a excluir, em qualquer caixa.
+ */
+function without(pairs: readonly [string, string][], name: string): [string, string][] {
+  const lower = name.toLowerCase();
+  return pairs.filter(([candidate]) => candidate.toLowerCase() !== lower);
+}
+
+/**
+ * Entrega os cabeçalhos ao `tjs.serve` sem juntar os repetidos.
+ *
+ * ## Por que não serve o `Headers` do runtime
+ *
+ * O `Headers` do txiki.js **junta** valores do mesmo nome numa string só,
+ * separados por vírgula:
+ *
+ * ```
+ * $ tjs eval 'const h=new Headers();h.append("set-cookie","a=1");h.append("set-cookie","b=2");console.log(JSON.stringify([...h]))'
+ * [["set-cookie","a=1, b=2"]]
+ * ```
+ *
+ * Para quase todo cabeçalho a vírgula é separador legítimo e juntar não custa
+ * nada. Para `Set-Cookie` ela não é: um navegador lê o cabeçalho juntado como
+ * UM cookie, o segundo cai dentro da lista de atributos do primeiro e é
+ * descartado, e o `Max-Age` que vale passa a ser o último da linha. Uma
+ * renovação de sessão emite dois cookies, e é por isso que ela não sobrevive a
+ * um `Headers`.
+ *
+ * O que o `tjs.serve` itera é o objeto `headers` **visível ao JS** — é essa a
+ * porta. Um objeto que rende um par por cabeçalho faz o servidor escrever uma
+ * linha por par.
+ *
+ * O retorno é tipado como `Headers` porque é o que o `Response` aceita no
+ * lugar, mas não é um: só os membros que o servidor toca estão aqui.
+ *
+ * @param pairs Pares `[nome, valor]`, na ordem em que saem na resposta.
+ */
+function multiHeaders(pairs: [string, string][]): Headers {
+  const iteratePairs = function* (): IterableIterator<[string, string]> {
+    for (const pair of pairs) {
+      yield pair;
+    }
+  };
+
+  return {
+    [Symbol.iterator]: iteratePairs,
+    entries: iteratePairs,
+    *keys(): IterableIterator<string> {
+      for (const [name] of pairs) {
+        yield name;
+      }
+    },
+    *values(): IterableIterator<string> {
+      for (const [, value] of pairs) {
+        yield value;
+      }
+    },
+    forEach(
+      callback: (value: string, key: string, parent: Headers) => void,
+      thisArg?: unknown
+    ): void {
+      for (const [name, value] of pairs) {
+        callback.call(thisArg, value, name, this as unknown as Headers);
+      }
+    },
+    // O primeiro, e não os dois juntos: quem chama `get('set-cookie')` num
+    // `Headers` de verdade recebe a string juntada, e é dela que se foge aqui.
+    get(name: string): string | null {
+      const at = indexOf(pairs, name);
+      return at === -1 ? null : pairs[at]![1];
+    },
+    has(name: string): boolean {
+      return indexOf(pairs, name) !== -1;
+    },
+    getSetCookie(): string[] {
+      return pairs.filter(([name]) => name.toLowerCase() === 'set-cookie').map(([, value]) => value);
+    },
+    append(name: string, value: string): void {
+      pairs.push([name, value]);
+    },
+    // O lugar do primeiro é o lugar do novo: um `set` não reordena a resposta.
+    set(name: string, value: string): void {
+      const at = indexOf(pairs, name);
+      const rest = without(pairs, name);
+      rest.splice(at === -1 ? rest.length : at, 0, [name, value]);
+      pairs.splice(0, pairs.length, ...rest);
+    },
+    delete(name: string): void {
+      pairs.splice(0, pairs.length, ...without(pairs, name));
+    },
+  } as unknown as Headers;
+}
+
+/**
  * Cria o handler `fetch` (Request -> Response) que adapta o Vike.
  * Web-standard: pode ser usado com qualquer servidor WinterTC, não só o tjs.
  */
@@ -220,6 +339,7 @@ export function createFetchHandler(
     // requisição errada assim que duas chegassem juntas.
     const requestId = crypto.randomUUID();
     const log = root.with({ requestId, method: request.method, url: pathname });
+    const setCookies: string[] = [];
 
     // O esquema do cliente vem do proxy quando ele o informa; senão, é o da
     // conexão recebida. O `Host` já chega correto e não é tocado.
@@ -248,6 +368,7 @@ export function createFetchHandler(
         headersOriginal: request.headers,
         logger: log,
         requestId,
+        setCookies,
       });
     } catch (error) {
       // O txiki imprime só o stack de exceções não tratadas, sem a mensagem —
@@ -265,10 +386,30 @@ export function createFetchHandler(
 
     const body = await httpResponse.getBody();
     log.info('página servida', { status: httpResponse.statusCode });
-    return new Response(body, {
-      status: httpResponse.statusCode,
-      headers: httpResponse.headers
+
+    if (setCookies.length === 0) {
+      return new Response(body, {
+        status: httpResponse.statusCode,
+        headers: httpResponse.headers,
+      });
+    }
+
+    const total = setCookies.length;
+    log.debug('cookies repassados', { total });
+
+    const pairs: [string, string][] = httpResponse.headers.filter(
+      ([name]) => name.toLowerCase() !== 'set-cookie'
+    );
+    for (const cookie of setCookies) {
+      pairs.push(['set-cookie', cookie]);
+    }
+
+    const response = new Response(body, { status: httpResponse.statusCode });
+    Object.defineProperty(response, 'headers', {
+      value: multiHeaders(pairs),
+      configurable: true,
     });
+    return response;
   };
 }
 
